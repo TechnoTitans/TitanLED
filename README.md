@@ -1,15 +1,6 @@
 # TitanLED
 FRC 1683's code for the LED lights on our numbers!
 
-## Structure
-```
-/
-├── YourSketchName/
-│   └── YourSketchName.ino    # Main Arduino sketch
-├── .gitignore
-└── README.md
-```
-
 ## Modes
 - Mode #0: Battery Saving Mode
 - Mode #1: Blue-White Chase
