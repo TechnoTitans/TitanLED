@@ -5,7 +5,7 @@
 #include <Adafruit_NeoPixel.h>
 #include <driver/i2s.h>
 
-// -- Hardware --------------------------------------------------
+// Hardware --------------------------------------------------
 #define LED_PIN     21
 #define NUM_LEDS    60
 #define LED_TYPE    NEO_GBR + NEO_KHZ800
@@ -20,19 +20,19 @@
 
 #define BUTTON_PIN  0
 
-// -- Chase tuning -----------------------------------------------
+// Chase tuning -----------------------------------------------
 #define CHASE_SPEED_MS  20
 #define CHASE_TAIL      20
 
-// -- VU tuning ---------------------------------------------------
+// VU tuning ---------------------------------------------------
 #define THRESH_LOW   20000 // adjust here for comp
 #define THRESH_HIGH  200000 // adjust here for comp
 
 #define ATTACK  0.80f // adjust here for comp
 #define DECAY   0.85f // adjust here for comp 
-//note to self - try to retune attack/decay at comp next time
+//note to self - try to retune attack/decay at comp next time pls
 
-// -- Globals ----------------------------------------------------
+// Globals ----------------------------------------------------
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, LED_TYPE);
 
 uint8_t  currentMode     = 0;
@@ -43,7 +43,7 @@ uint32_t lastChaseFrame  = 0;
 
 float smoothedPeak = 0;
 
-// -- I2S init ----------------------------------------------------
+// I2S init ----------------------------------------------------
 void initMic() {
   i2s_config_t i2s_config = {
     .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
@@ -71,7 +71,7 @@ void initMic() {
   i2s_zero_dma_buffer(I2S_PORT);
 }
 
-// -- Read peak amplitude -----------------------------------------
+// Read peak amplitude ----------------------------------------------
 int32_t readPeak() {
   int32_t samples[SAMPLES];
   size_t  bytesRead = 0;
@@ -86,7 +86,7 @@ int32_t readPeak() {
   return peak;
 }
 
-// -- Helpers ------------------------------------------------------
+// Helpers ------------------------------------------------------
 void fillRange(int from, int to, uint32_t col) {
   for (int i = from; i <= to; i++) strip.setPixelColor(i, col);
 }
@@ -110,19 +110,17 @@ void effectBlueWhiteChase() {
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
-    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(0, b, 0));
   }
 
-  // White tail — offset halfway around the strip
+  // White tail — halfway around the strip
   int whitePos = (chasePos + NUM_LEDS / 2) % NUM_LEDS;
   for (int t = 0; t < CHASE_TAIL; t++) {
     int   pos  = ((int)whitePos - t + NUM_LEDS) % NUM_LEDS;
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure white in RBG order = (bright, bright, bright)
+    
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -175,9 +173,9 @@ void effectFreqVU() {
       strip.clear();
 
     for (int i = 0; i < activeLayers; i++) {
-        // One unique color per layer rbg
+        // (r, b, g)
         uint32_t layerColors[15] = {
-          strip.Color(0,   40,  0),    // layer 1  - deep blue
+          strip.Color(0,   40,  0),    // layer 1  - dark blue
           strip.Color(0,   70,  0),    // layer 2
           strip.Color(0,   100, 0),    // layer 3
           strip.Color(0,   130, 0),    // layer 4
@@ -185,7 +183,7 @@ void effectFreqVU() {
           strip.Color(0,   190, 0),    // layer 6
           strip.Color(0,   220, 0),    // layer 7
           strip.Color(0,   255, 0),    // layer 8  - pure blue
-          strip.Color(60,  255, 60),    // layer 9  - starts adding red
+          strip.Color(60,  255, 60),    // layer 9  - starts adding red and green
           strip.Color(110, 255, 110),    // layer 10
           strip.Color(150, 255, 150),    // layer 11
           strip.Color(185, 255, 185),    // layer 12
@@ -203,9 +201,6 @@ void effectFreqVU() {
       strip.show();
   }
 
-
-//
-
 // Effect #3: RedWhiteChase ----------------------------------------
 void effectRedWhiteChase() {
   if (millis() - lastChaseFrame < CHASE_SPEED_MS) return;
@@ -219,7 +214,6 @@ void effectRedWhiteChase() {
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
-    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(b, 0, 0));
   }
@@ -231,7 +225,6 @@ void effectRedWhiteChase() {
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
-    // Pure white in RBG order = (bright, bright, bright)
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -256,7 +249,7 @@ void effectSolidRedColor() {
   strip.show();
 }
 
-// -- set up function --------------------------------------------
+// set up function --------------------------------------------
 void setup() {
   Serial.begin(115200);
   Serial.println("Sparkle Motion Stick – starting up");
@@ -274,7 +267,7 @@ void setup() {
 }
 
 
-// -- loop function ---------------------------------------------
+// loop function ---------------------------------------------
 void loop() {
   bool btnState = digitalRead(BUTTON_PIN);
   if (btnState == LOW && lastButtonState == HIGH) {
