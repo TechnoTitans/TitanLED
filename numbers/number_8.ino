@@ -4,8 +4,10 @@
 
 #include <Adafruit_NeoPixel.h>
 #include <driver/i2s.h>
+#include <esp_now.h>
+#include <WiFi.h>
 
-// Hardware ----------------------------------------------------
+// ── Hardware ─────────────────────────────────────────────────
 #define LED_PIN     21
 #define NUM_LEDS    67
 #define LED_TYPE    NEO_GBR + NEO_KHZ800
@@ -20,18 +22,24 @@
 
 #define BUTTON_PIN  0
 
-// Chase tuning ------------------------------------------------
+// ── Chase tuning ─────────────────────────────────────────────
 #define CHASE_SPEED_MS  20
 #define CHASE_TAIL      20
 
-// VU tuning ----------------------------------------------------
+// -- VU tuning ────────────────────────────────────────────────
 #define THRESH_LOW   20000
 #define THRESH_HIGH  200000
 
 #define ATTACK  0.50f
 #define DECAY   0.85f
 
-// Globals ------------------------------------------------------
+// -- All board MACAddresses
+uint8_t number1[] = {0x88, 0x13, 0xBF, 0xE5, 0x95, 0x68}; 
+uint8_t number6[] = {0x88, 0x13, 0xBF, 0xE5, 0x91, 0x00};
+uint8_t number8[] = {0x20, 0x43, 0xA8, 0xF1, 0xD5, 0xF4};
+uint8_t number3[] = {0x88, 0x13, 0xBF, 0xE5, 0x98, 0x38};
+
+// -- Globals ───────────────────────────────────────────────────
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, LED_TYPE);
 
 uint8_t  currentMode     = 0;
@@ -42,7 +50,54 @@ uint32_t lastChaseFrame  = 0;
 
 float smoothedPeak = 0;
 
-// I2S init -----------------------------------------------------
+// ── ESP-NOW: send mode to all other boards ────────────────────
+void broadcastMode(uint8_t mode) {
+  esp_now_send(number1, &mode, sizeof(mode));
+  esp_now_send(number6, &mode, sizeof(mode));
+  esp_now_send(number3, &mode, sizeof(mode));
+}
+
+// ── ESP-NOW: called when this board receives a mode ──────────
+void onReceive(const esp_now_recv_info *info, const uint8_t *data, int len) {
+  uint8_t receivedMode = data[0];
+  if (receivedMode != currentMode) {
+    currentMode = receivedMode;
+    strip.clear();
+    strip.show();
+    Serial.printf("Mode synced → %d\n", currentMode);
+  }
+}
+
+// ── ESP-NOW: called after sending ────────────────────────────
+void onSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Sync OK" : "Sync Failed");
+}
+
+// ── ESP-NOW init ─────────────────────────────────────────────
+void initESPNow() {
+  WiFi.mode(WIFI_STA);
+  esp_now_init();
+  esp_now_register_send_cb(onSent);
+  esp_now_register_recv_cb(onReceive);
+  esp_now_peer_info_t peerInfo = {};
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+
+  //register number1
+  memcpy(peerInfo.peer_addr, number1, 6);
+  esp_now_add_peer(&peerInfo);
+
+  //register number6
+  memcpy(peerInfo.peer_addr, number6, 6);
+  esp_now_add_peer(&peerInfo);
+
+  //register number3
+  memcpy(peerInfo.peer_addr, number3, 6);
+  esp_now_add_peer(&peerInfo);
+
+}*/
+
+// ── I2S init ─────────────────────────────────────────────────
 void initMic() {
   i2s_config_t i2s_config = {
     .mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
@@ -70,7 +125,7 @@ void initMic() {
   i2s_zero_dma_buffer(I2S_PORT);
 }
 
-// Read peak amplitude ---------------------------------------------
+// ── Read peak amplitude ───────────────────────────────────────
 int32_t readPeak() {
   int32_t samples[SAMPLES];
   size_t  bytesRead = 0;
@@ -85,12 +140,12 @@ int32_t readPeak() {
   return peak;
 }
 
-// Helpers ----------------------------------------------------------
+// ── Helpers ───────────────────────────────────────────────────
 void fillRange(int from, int to, uint32_t col) {
   for (int i = from; i <= to; i++) strip.setPixelColor(i, col);
 }
 
-// Effect 0: Battery Saving Mode-------------------------------------
+// ── Effect 0: Battery Saving Mode ────────────────────────────
 void effectLowBatteryMode() {
   strip.clear();
   strip.show();
@@ -109,6 +164,7 @@ void effectBlueWhiteChase() {
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
+    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(0, b, 0));
   }
@@ -120,6 +176,7 @@ void effectBlueWhiteChase() {
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
+    // Pure white in RBG order = (bright, bright, bright)
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -128,7 +185,7 @@ void effectBlueWhiteChase() {
   chasePos = (chasePos + 1) % NUM_LEDS;
 }
 
-// Effect #2: VU meter -------------------------------------------
+// ── Effect #2: VU meter ---------------------------------------
 void effectFreqVU() {
   int32_t peak = readPeak();
 
@@ -172,7 +229,7 @@ void effectFreqVU() {
       strip.clear();
 
     for (int i = 0; i < activeLayers; i++) {
-        // (r, b, g)
+        // One unique color per layer rbg
         uint32_t layerColors[15] = {
           strip.Color(0,   40,  0),    // layer 1  - deep blue
           strip.Color(0,   70,  0),    // layer 2
@@ -216,6 +273,7 @@ void effectRedWhiteChase() {
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
+    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(b, 0, 0));
   }
@@ -227,6 +285,7 @@ void effectRedWhiteChase() {
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
 
+    // Pure white in RBG order = (bright, bright, bright)
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -251,7 +310,7 @@ void effectSolidRedColor() {
   strip.show();
 }
 
-// Setup -----------------------------------------------------------
+// ── Setup ─────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
   Serial.println("Sparkle Motion Stick – starting up");
@@ -264,11 +323,14 @@ void setup() {
   initMic();
   Serial.println("Mic ready");
 
+  initESPNow();
+  Serial.println("ESP-NOW ready");
+
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.println("Mode 0: effectLowBatteryMode  |  Press BOOT to switch");
 }
 
-// Loop ------------------------------------------------------------
+// ── Loop ──────────────────────────────────────────────────────
 void loop() {
   bool btnState = digitalRead(BUTTON_PIN);
   if (btnState == LOW && lastButtonState == HIGH) {
@@ -276,6 +338,8 @@ void loop() {
     currentMode = (currentMode + 1) % 6;
     strip.clear();
     strip.show();
+    broadcastMode(currentMode);
+
     Serial.printf("Mode → %s\n",
       currentMode == 0 ? "Battery Saving Mode" :
       currentMode == 1 ? "Blue-White Chase" :
