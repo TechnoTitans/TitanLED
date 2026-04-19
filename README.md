@@ -28,5 +28,11 @@ number_x.ino
 - Mode #4: Solid-Blue Color
 - Mode #5: Solid-Red Color
 
+## Purpose for Each Tester File
+- default_test: used to test wire connections between the LED light strips and the Adafruit Sparkle Motion Stick board
+- testReceiver/testSender: used to check if communication between numbers works
+  - testSender: sends a random set of numbers
+  - testReceiver: receives that set of numbers and prints them out
+
 ## How to Use
-Using any of the buttons found on the back of the numbers, cycle between the different preprogrammed modes (one button on any number changes all at once). When finished, cycle to the "Battery Saving Mode" to conserve the power in the bank. 
+Using any of the buttons found on the back of the numbers, cycle between the different preprogrammed modes (one button on any number changes all at once). When finished, cycle to the "Battery Saving Mode" to conserve the power in the bank.
