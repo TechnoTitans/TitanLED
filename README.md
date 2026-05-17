@@ -15,7 +15,7 @@ number_x.ino
 │   ├── Mode #2: smoothing sound input; mapping layers; assign colors per layer; 
 │   ├── Mode #3:
 │   ├── Mode #4:
-│   ├── Mode #5:
+│   ├── ...
 └──  set up/loop function
 
 ```
@@ -25,8 +25,8 @@ number_x.ino
 - Mode #1: Blue-White Chase
 - Mode #2: VU Meter Effect
 - Mode #3: Red-White Chase
-- Mode #4: Solid-Blue Color
-- Mode #5: Solid-Red Color
+- Mode #4/5: Solid-Blue/Red Color
+- Mode #6/7: Alternating Red/Blue Color
 
 ## Purpose for Each Tester File
 - default_test: used to test wire connections between the LED light strips and the Adafruit Sparkle Motion Stick board
