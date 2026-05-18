@@ -12,7 +12,7 @@ number_x.ino
 ├── Effects
 │   ├── Mode #0:
 │   ├── Mode #1:
-│   ├── Mode #2: smoothing sound input; mapping layers; assign colors per layer; 
+│   ├── Mode #2: 
 │   ├── Mode #3:
 │   ├── Mode #4:
 │   ├── ...
@@ -22,9 +22,8 @@ number_x.ino
 
 ## Modes
 - Mode #0: Battery Saving Mode
-- Mode #1: Blue-White Chase
-- Mode #2: VU Meter Effect
-- Mode #3: Red-White Chase
+- Mode #1/2: Blue/Red-White Chase
+- Mode #3: VU Meter Effect
 - Mode #4/5: Solid-Blue/Red Color
 - Mode #6/7: Alternating Red/Blue Color
 
