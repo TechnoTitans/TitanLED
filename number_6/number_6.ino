@@ -34,7 +34,7 @@
 #define DECAY   0.85f
 
 // Alternating effect tuning
-#define ALT_INTERVAL_MS  3000
+#define ALT_INTERVAL_MS  800
 #define IS_ODD_SIGN      false //false for 6 and 3
 
 // -- All board MACAddresses
@@ -195,7 +195,41 @@ void effectBlueWhiteChase() {
   chasePos = (chasePos + 1) % NUM_LEDS;
 }
 
-// Effect #2: VU meter
+// Effect #2: RedWhiteChase
+void effectRedWhiteChase() {
+  if (millis() - lastChaseFrame < CHASE_SPEED_MS) return;
+  lastChaseFrame = millis();
+
+  strip.clear();
+
+  // Red Tail
+  for (int t = 0; t < CHASE_TAIL; t++) {
+    int   pos   = ((int)chasePos - t + NUM_LEDS) % NUM_LEDS;
+    float frac  = 1.0f - (float)t / CHASE_TAIL;
+    uint8_t bright = (uint8_t)(frac * frac * 255);
+
+    // Pure blue in RBG order = (0, bright, 0)
+    uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
+    strip.setPixelColor(pos, strip.Color(b, 0, 0));
+  }
+
+  // White tail — offset halfway around the strip
+  int whitePos = (chasePos + NUM_LEDS / 2) % NUM_LEDS;
+  for (int t = 0; t < CHASE_TAIL; t++) {
+    int   pos  = ((int)whitePos - t + NUM_LEDS) % NUM_LEDS;
+    float frac = 1.0f - (float)t / CHASE_TAIL;
+    uint8_t bright = (uint8_t)(frac * frac * 255);
+
+    // Pure white in RBG order = (bright, bright, bright)
+    uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
+    strip.setPixelColor(pos, strip.Color(w, w, w));
+  }
+
+  strip.show();
+  chasePos = (chasePos + 1) % NUM_LEDS;
+}
+
+// Effect #3: VU meter
 void effectFreqVU() {
   int32_t peak = readPeak();
 
@@ -265,43 +299,6 @@ void effectFreqVU() {
       }
 
       strip.show();
-  }
-
-
-//
-
-// Effect #3: RedWhiteChase
-void effectRedWhiteChase() {
-  if (millis() - lastChaseFrame < CHASE_SPEED_MS) return;
-  lastChaseFrame = millis();
-
-  strip.clear();
-
-  // Red Tail
-  for (int t = 0; t < CHASE_TAIL; t++) {
-    int   pos   = ((int)chasePos - t + NUM_LEDS) % NUM_LEDS;
-    float frac  = 1.0f - (float)t / CHASE_TAIL;
-    uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure blue in RBG order = (0, bright, 0)
-    uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
-    strip.setPixelColor(pos, strip.Color(b, 0, 0));
-  }
-
-  // White tail — offset halfway around the strip
-  int whitePos = (chasePos + NUM_LEDS / 2) % NUM_LEDS;
-  for (int t = 0; t < CHASE_TAIL; t++) {
-    int   pos  = ((int)whitePos - t + NUM_LEDS) % NUM_LEDS;
-    float frac = 1.0f - (float)t / CHASE_TAIL;
-    uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure white in RBG order = (bright, bright, bright)
-    uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
-    strip.setPixelColor(pos, strip.Color(w, w, w));
-  }
-
-  strip.show();
-  chasePos = (chasePos + 1) % NUM_LEDS;
 }
 
 // Effect #4: SolidBlueColor 
@@ -383,8 +380,8 @@ void loop() {
     Serial.printf("Mode → %s\n",
       currentMode == 0 ? "Battery Saving Mode" :
       currentMode == 1 ? "Blue-White Chase" :
-      currentMode == 2 ? "Frequency VU Meter" : 
-      currentMode == 3 ? "Red-White Chase" : 
+      currentMode == 2 ? "Red-White Chase" :
+      currentMode == 3 ? "Frequency VU Meter" : 
       currentMode == 4 ? "SolidBlueColor" :
       currentMode == 5 ? "SolidRedColor" :
       currentMode == 6 ? "Alternating Red" : "Alternating Blue");
@@ -395,8 +392,8 @@ void loop() {
   switch (currentMode) {
     case 0: effectLowBatteryMode(); break;
     case 1: effectBlueWhiteChase(); break;
-    case 2: effectFreqVU();         break;
-    case 3: effectRedWhiteChase(); break;
+    case 2: effectRedWhiteChase(); break;
+    case 3: effectFreqVU(); break;
     case 4: effectSolidBlueColor(); break;
     case 5: effectSolidRedColor(); break;
     case 6: effectAlternatingRed(); break;
