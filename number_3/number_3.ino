@@ -6,6 +6,8 @@
 #include <driver/i2s.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
+#include <esp_sleep.h>
 
 // Hardware
 #define LED_PIN     21
@@ -37,6 +39,13 @@
 #define ALT_INTERVAL_MS  800
 #define IS_ODD_SIGN      false //false for 6 and 3
 
+// Sleep tuning
+#define SLEEP_TIMEOUT_MS  120000  // 2 minutes in Battery Saving Mode before deep sleep
+
+// ESP-NOW message types
+#define MSG_SET_MODE      0x01
+#define MSG_REQUEST_MODE  0x02
+
 // All board MACAddresses
 uint8_t number1[] = {0x88, 0x13, 0xBF, 0xE5, 0x95, 0x68}; 
 uint8_t number6[] = {0x88, 0x13, 0xBF, 0xE5, 0x91, 0x00};
@@ -57,23 +66,45 @@ float smoothedPeak = 0;
 uint8_t  altState      = 0;
 uint32_t lastAltSwitch = 0;
 
+uint32_t enteredLowBatteryAt = 0;
+
 // ESP-NOW: send mode to all other boards
 void broadcastMode(uint8_t mode) {
+  uint8_t payload[2] = { MSG_REQUEST_MODE, 0 };
   esp_now_send(number1, &mode, sizeof(mode));
   esp_now_send(number6, &mode, sizeof(mode));
   esp_now_send(number8, &mode, sizeof(mode));
 }
 
+//ESP-NOW: ask others what mode they're in
+void requestModeFromPeers() {
+  uint8_t payload[2] = { MSG_REQUEST_MODE, 0};
+  esp_now_send(number6, payload, sizeof(payload));
+  esp_now_send(number8, payload, sizeof(payload));
+  esp_now_send(number3, payload, sizeof(payload));
+}
+
 // ESP-NOW: called when this board receives a mode
 void onReceive(const esp_now_recv_info *info, const uint8_t *data, int len) {
-  uint8_t receivedMode = data[0];
-  if (receivedMode != currentMode) {
-    currentMode = receivedMode;
-    altState = 0;
-    lastAltSwitch = millis();
-    strip.clear();
-    strip.show();
-    Serial.printf("Mode synced → %d\n", currentMode);
+  uint8_t msgType = data[0];
+
+  if (msgType == MSG_SET_MODE) {
+    uint8_t receivedMode = data[1];
+    if (receivedMode != currentMode) {
+      currentMode = receivedMode;
+      altState = 0;
+      lastAltSwitch = millis();
+      if (currentMode == 0) enteredLowBatteryAt = millis();
+      strip.clear();
+      strip.show();
+      Serial.printf("Mode synced -> %d\n", currentMode);
+    }
+  }
+  else if (msgType == MSG_REQUEST_MODE) {
+    // A newly-woken board is asking what mode we're in — tell it
+    uint8_t payload[2] = { MSG_SET_MODE, currentMode };
+    esp_now_send(info->src_addr, payload, sizeof(payload));
+    Serial.println("Replied to mode request");
   }
 }
 
@@ -158,6 +189,12 @@ void fillRange(int from, int to, uint32_t col) {
 void effectLowBatteryMode() {
   strip.clear();
   strip.show();
+
+  if (millis() - enteredLowBatteryAt >= SLEEP_TIMEOUT_MS) {
+    Serial.println("Entering deep sleep");
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    esp_deep_sleep_start();
+  }
 }
 
 // Effect #1: BlueWhiteChase
@@ -362,6 +399,10 @@ void setup() {
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.println("Mode 0: effectLowBatteryMode  |  Press BOOT to switch");
+
+  requestModeFromPeers();
+  Serial.println("Requested current mode from peers");
+  enteredLowBatteryAt = millis();
 }
 
 // Loop

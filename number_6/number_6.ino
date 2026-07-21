@@ -6,6 +6,8 @@
 #include <driver/i2s.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
+#include <esp_sleep.h>
 
 // Hardware
 #define LED_PIN     21
@@ -37,6 +39,13 @@
 #define ALT_INTERVAL_MS  800
 #define IS_ODD_SIGN      false //false for 6 and 3
 
+// Sleep tuning
+#define SLEEP_TIMEOUT_MS  120000  // 2 minutes in Battery Saving Mode before deep sleep
+
+// ESP-NOW message types
+#define MSG_SET_MODE      0x01
+#define MSG_REQUEST_MODE  0x02
+
 // -- All board MACAddresses
 uint8_t number1[] = {0x88, 0x13, 0xBF, 0xE5, 0x95, 0x68}; 
 uint8_t number6[] = {0x88, 0x13, 0xBF, 0xE5, 0x91, 0x00};
@@ -57,24 +66,44 @@ float smoothedPeak = 0;
 uint8_t  altState      = 0;
 uint32_t lastAltSwitch = 0;
 
+uint32_t enteredLowBatteryAt = 0;
 
 // ESP-NOW: send mode to all other boards
 void broadcastMode(uint8_t mode) {
-  esp_now_send(number1, &mode, sizeof(mode));
-  esp_now_send(number8, &mode, sizeof(mode));
-  esp_now_send(number3, &mode, sizeof(mode));
+  uint8_t payload[2] = { MSG_SET_MODE, mode };
+  esp_now_send(number1, payload, sizeof(payload));
+  esp_now_send(number8, payload, sizeof(payload));
+  esp_now_send(number3, payload, sizeof(payload));
 }
 
-// ESP-NOW: called when this board receives a mode
+// ESP-NOW: ask others what mode they're currently in
+void requestModeFromPeers() {
+  uint8_t payload[2] = { MSG_REQUEST_MODE, 0 };
+  esp_now_send(number1, payload, sizeof(payload));
+  esp_now_send(number8, payload, sizeof(payload));
+  esp_now_send(number3, payload, sizeof(payload));
+}
+
+// ESP-NOW: called when this board receives a message
 void onReceive(const esp_now_recv_info *info, const uint8_t *data, int len) {
-  uint8_t receivedMode = data[0];
-  if (receivedMode != currentMode) {
-    currentMode = receivedMode;
-    altState = 0;
-    lastAltSwitch = millis();
-    strip.clear();
-    strip.show();
-    Serial.printf("Mode synced → %d\n", currentMode);
+  uint8_t msgType = data[0];
+
+  if (msgType == MSG_SET_MODE) {
+    uint8_t receivedMode = data[1];
+    if (receivedMode != currentMode) {
+      currentMode = receivedMode;
+      altState = 0;
+      lastAltSwitch = millis();
+      if (currentMode == 0) enteredLowBatteryAt = millis();
+      strip.clear();
+      strip.show();
+      Serial.printf("Mode synced -> %d\n", currentMode);
+    }
+  }
+  else if (msgType == MSG_REQUEST_MODE) {
+    uint8_t payload[2] = { MSG_SET_MODE, currentMode };
+    esp_now_send(info->src_addr, payload, sizeof(payload));
+    Serial.println("Replied to mode request");
   }
 }
 
@@ -159,6 +188,12 @@ void fillRange(int from, int to, uint32_t col) {
 void effectLowBatteryMode() {
   strip.clear();
   strip.show();
+
+  if (millis() - enteredLowBatteryAt >= SLEEP_TIMEOUT_MS) {
+    Serial.println("Entering deep sleep - press BOOT to wake");
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    esp_deep_sleep_start();
+  }
 }
 
 // Effect #1: BlueWhiteChase
@@ -173,8 +208,6 @@ void effectBlueWhiteChase() {
     int   pos   = ((int)chasePos - t + NUM_LEDS) % NUM_LEDS;
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(0, b, 0));
   }
@@ -185,8 +218,6 @@ void effectBlueWhiteChase() {
     int   pos  = ((int)whitePos - t + NUM_LEDS) % NUM_LEDS;
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure white in RBG order = (bright, bright, bright)
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -207,8 +238,6 @@ void effectRedWhiteChase() {
     int   pos   = ((int)chasePos - t + NUM_LEDS) % NUM_LEDS;
     float frac  = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure blue in RBG order = (0, bright, 0)
     uint8_t b = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(b, 0, 0));
   }
@@ -219,8 +248,6 @@ void effectRedWhiteChase() {
     int   pos  = ((int)whitePos - t + NUM_LEDS) % NUM_LEDS;
     float frac = 1.0f - (float)t / CHASE_TAIL;
     uint8_t bright = (uint8_t)(frac * frac * 255);
-
-    // Pure white in RBG order = (bright, bright, bright)
     uint8_t w = (uint8_t)((uint16_t)255 * bright / 255);
     strip.setPixelColor(pos, strip.Color(w, w, w));
   }
@@ -248,57 +275,56 @@ void effectFreqVU() {
   float logVal = log((float)smoothedPeak + 1.0f);
   float normalized = (logVal - LOG_MIN) / (LOG_MAX - LOG_MIN);
 
-    int activeLayers = constrain((int)(normalized * 15.0f), 0, 15);
+  int activeLayers = constrain((int)(normalized * 15.0f), 0, 15);
 
-      struct Layer { int leftFrom, leftTo, middleLeft, middle, middleRight, rightFrom, rightTo; };
+  struct Layer { int leftFrom, leftTo, middleLeft, middle, middleRight, rightFrom, rightTo; };
 
-        Layer layers[15] = {
-          { 40, 42, 41, 42, 40, 40, 42},   // layer 1  - 40 41 42
-          { 39, 39, 39,  4,  4,  4,  4},   // layer 2  - 4 39
-          {  5,  5, 38, 38, 53, 55, 56},   // layer 3  - 5 38 53 55 56
-          {  6,  6, 37, 37, 46, 46, 53},   // layer 4  - 6 37 46 53
-          {  7,  7, 36, 36, 47, 47, 52},   // layer 5  - 7 36 47 52
-          {  8,  8, 35, 35, 48, 48, 51},   // layer 6  - 8 35 48 51
-          {  9,  9, 34, 34, 49, 49, 50},   // layer 7  - 9 34 49 50
-          { 10, 10, 29, 30, 31, 32, 33},   // layer 8  - 10 29 30 31 32 33
-          { 11, 11, 11, 11, 28, 28, 28},   // layer 9  - 11 28
-          { 12, 12, 12, 12, 27, 27, 27},   // layer 10 - 12 27
-          { 13, 13, 13, 13, 26, 26, 26},   // layer 11 - 13 26
-          { 14, 14, 23, 23, 24, 25, 25},   // layer 12 - 14 23 24 25
-          { 15, 15, 15, 15, 22, 22, 22},   // layer 13 - 15 22
-          { 16, 16, 16, 16, 20, 21, 21},   // layer 14 - 16 20 21
-          { 17, 17, 17, 17, 18, 19, 19},   // layer 15 - 17 18 19
-                  };
+  Layer layers[15] = {
+    { 40, 42, 41, 42, 40, 40, 42},   // layer 1  - 40 41 42
+    { 39, 39, 39,  4,  4,  4,  4},   // layer 2  - 4 39
+    {  5,  5, 38, 38, 53, 55, 56},   // layer 3  - 5 38 53 55 56
+    {  6,  6, 37, 37, 46, 46, 53},   // layer 4  - 6 37 46 53
+    {  7,  7, 36, 36, 47, 47, 52},   // layer 5  - 7 36 47 52
+    {  8,  8, 35, 35, 48, 48, 51},   // layer 6  - 8 35 48 51
+    {  9,  9, 34, 34, 49, 49, 50},   // layer 7  - 9 34 49 50
+    { 10, 10, 29, 30, 31, 32, 33},   // layer 8  - 10 29 30 31 32 33
+    { 11, 11, 11, 11, 28, 28, 28},   // layer 9  - 11 28
+    { 12, 12, 12, 12, 27, 27, 27},   // layer 10 - 12 27
+    { 13, 13, 13, 13, 26, 26, 26},   // layer 11 - 13 26
+    { 14, 14, 23, 23, 24, 25, 25},   // layer 12 - 14 23 24 25
+    { 15, 15, 15, 15, 22, 22, 22},   // layer 13 - 15 22
+    { 16, 16, 16, 16, 20, 21, 21},   // layer 14 - 16 20 21
+    { 17, 17, 17, 17, 18, 19, 19},   // layer 15 - 17 18 19
+  };
 
-      strip.clear();
+  strip.clear();
 
-    for (int i = 0; i < activeLayers; i++) {
-        // One unique color per layer rbg
-        uint32_t layerColors[15] = {
-          strip.Color(0,   40,  0),    // layer 1  - deep blue
-          strip.Color(0,   70,  0),    // layer 2
-          strip.Color(0,   100, 0),    // layer 3
-          strip.Color(0,   130, 0),    // layer 4
-          strip.Color(0,   160, 0),    // layer 5
-          strip.Color(0,   190, 0),    // layer 6
-          strip.Color(0,   220, 0),    // layer 7
-          strip.Color(0,   255, 0),    // layer 8  - pure blue
-          strip.Color(60,  255, 60),    // layer 9  - starts adding red
-          strip.Color(110, 255, 110),    // layer 10
-          strip.Color(150, 255, 150),    // layer 11
-          strip.Color(185, 255, 185),    // layer 12
-          strip.Color(215, 255, 215),    // layer 13
-          strip.Color(240, 255, 240),    // layer 14
-          strip.Color(255, 255, 255),    // layer 15 - pure white
-        };
+  for (int i = 0; i < activeLayers; i++) {
+    uint32_t layerColors[15] = {
+      strip.Color(0,   40,  0),    // layer 1  - deep blue
+      strip.Color(0,   70,  0),    // layer 2
+      strip.Color(0,   100, 0),    // layer 3
+      strip.Color(0,   130, 0),    // layer 4
+      strip.Color(0,   160, 0),    // layer 5
+      strip.Color(0,   190, 0),    // layer 6
+      strip.Color(0,   220, 0),    // layer 7
+      strip.Color(0,   255, 0),    // layer 8  - pure blue
+      strip.Color(60,  255, 60),    // layer 9  - starts adding red
+      strip.Color(110, 255, 110),    // layer 10
+      strip.Color(150, 255, 150),    // layer 11
+      strip.Color(185, 255, 185),    // layer 12
+      strip.Color(215, 255, 215),    // layer 13
+      strip.Color(240, 255, 240),    // layer 14
+      strip.Color(255, 255, 255),    // layer 15 - pure white
+    };
 
-        uint32_t col = layerColors[i];
-        fillRange(layers[i].leftFrom,   layers[i].leftTo,    col);
-        fillRange(layers[i].middleLeft, layers[i].middleRight, col);
-        fillRange(layers[i].rightFrom,  layers[i].rightTo,   col);
-      }
+    uint32_t col = layerColors[i];
+    fillRange(layers[i].leftFrom,   layers[i].leftTo,    col);
+    fillRange(layers[i].middleLeft, layers[i].middleRight, col);
+    fillRange(layers[i].rightFrom,  layers[i].rightTo,   col);
+  }
 
-      strip.show();
+  strip.show();
 }
 
 // Effect #4: SolidBlueColor 
@@ -328,7 +354,6 @@ void effectAlternatingRed() {
   uint32_t color = showRed ? strip.Color(255, 0, 0) : strip.Color(255, 255, 255);
   strip.fill(color);
   strip.show();
-
 }
 
 // Effect #7 AlternatingBlue
@@ -342,7 +367,6 @@ void effectAlternatingBlue() {
   uint32_t color = showBlue ? strip.Color(0, 255, 0) : strip.Color(255, 255, 255);
   strip.fill(color);
   strip.show();
-
 }
 
 // Setup 
@@ -361,6 +385,11 @@ void setup() {
   initESPNow();
   Serial.println("ESP-NOW ready");
 
+  requestModeFromPeers();
+  Serial.println("Requested current mode from peers");
+
+  enteredLowBatteryAt = millis();
+
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   Serial.println("Mode 0: effectLowBatteryMode  |  Press BOOT to switch");
 }
@@ -373,6 +402,7 @@ void loop() {
     currentMode = (currentMode + 1) % 8;
     altState = 0;
     lastAltSwitch = millis();
+    if (currentMode == 0) enteredLowBatteryAt = millis();
     strip.clear();
     strip.show();
     broadcastMode(currentMode);
